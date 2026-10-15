@@ -1,0 +1,26 @@
+services:
+  uptimer:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.example.json:/etc/uptimer/config.json:ro
+    environment:
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-http://alert-sink:9000/hook}
+      UPTIMER_PUBLIC_URL: http://localhost:8080
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/alerts.yml:/etc/prometheus/alerts.yml:ro
+    depends_on: [uptimer]
+
+  # Logs every webhook it receives, so alerts are visible without a real Slack.
+  alert-sink:
+    image: mendhak/http-https-echo:35
+    environment:
+      HTTP_PORT: 9000

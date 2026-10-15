@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uptimer Status</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --card: #ffffff; --ink: #1b1d1f; --muted: #6b6f75; --line: #e3e1da;
+    --up: #2f9e6b; --deg: #d49a1d; --down: #d1453b; --unk: #9aa0a6;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111315; --card: #1a1d20; --ink: #eceae4; --muted: #8e939a; --line: #2a2e33; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 40px 16px 64px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 20px; letter-spacing: -0.01em; margin: 0; }
+  h1 span { font-family: var(--mono); color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 8px; }
+  .updated { color: var(--muted); font-size: 13px; font-family: var(--mono); }
+  .banner { margin: 20px 0 28px; padding: 18px 20px; border-radius: 10px; color: #fff; font-weight: 600;
+            display: flex; align-items: center; gap: 10px; }
+  .banner.up { background: var(--up); } .banner.degraded { background: var(--deg); }
+  .banner.down { background: var(--down); } .banner.unknown { background: var(--unk); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; margin-bottom: 12px; }
+  .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .name { font-weight: 600; }
+  .endpoint { color: var(--muted); font-family: var(--mono); font-size: 12.5px; word-break: break-all; }
+  .pill { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+          padding: 3px 10px; border-radius: 999px; color: #fff; white-space: nowrap; }
+  .pill.up { background: var(--up); } .pill.degraded { background: var(--deg); }
+  .pill.down { background: var(--down); } .pill.unknown { background: var(--unk); }
+  .bars { display: flex; gap: 2px; height: 32px; margin: 14px 0 8px; overflow: hidden; }
+  .bars i { flex: 1 1 0; min-width: 0; border-radius: 2px; background: var(--line); }
+  .bars i.up { background: var(--up); } .bars i.degraded { background: var(--deg); } .bars i.down { background: var(--down); }
+  .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 10px; }
+  .stat b { display: block; font-family: var(--mono); font-size: 15px; font-weight: 600; }
+  .stat small { color: var(--muted); font-size: 12px; }
+  .budget { height: 4px; border-radius: 2px; background: var(--line); margin-top: 6px; overflow: hidden; }
+  .budget > div { height: 100%; background: var(--up); }
+  .reason { margin-top: 10px; font-size: 13px; color: var(--down); font-family: var(--mono); }
+  .reason.warn { color: var(--deg); }
+  footer { margin-top: 28px; color: var(--muted); font-size: 13px; }
+  footer a { color: inherit; }
+  @media (max-width: 560px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .bars { gap: 1px; } .bars i { border-radius: 1px; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>System status <span>uptimer</span></h1>
+    <div class="updated" id="updated">loading…</div>
+  </header>
+  <div class="banner unknown" id="banner">Checking…</div>
+  <div id="targets"></div>
+  <footer>Last 90 checks per target · <a href="/api/status">JSON API</a> · <a href="/metrics">Prometheus metrics</a></footer>
+</main>
+<script>
+const BANNER = {
+  up: "All systems operational",
+  degraded: "Some systems degraded",
+  down: "Partial outage",
+  unknown: "Waiting for first checks",
+};
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function fmtMs(ns) {
+  if (!ns) return "—";
+  const ms = ns / 1e6;
+  return ms < 1000 ? ms.toFixed(ms < 10 ? 1 : 0) + " ms" : (ms / 1000).toFixed(2) + " s";
+}
+
+function stat(label, value, extra) {
+  const s = el("div", "stat");
+  s.append(el("b", "", value), el("small", "", label));
+  if (extra) s.append(extra);
+  return s;
+}
+
+function card(t, hist) {
+  const c = el("div", "card");
+  const head = el("div", "row");
+  const left = el("div");
+  left.append(el("div", "name", t.name), el("div", "endpoint", `${t.type.toUpperCase()} · ${t.endpoint}`));
+  head.append(left, el("span", "pill " + t.status, t.status));
+  c.append(head);
+
+  const bars = el("div", "bars");
+  const pad = Math.max(0, 90 - hist.length);
+  for (let i = 0; i < pad; i++) bars.append(el("i"));
+  for (const h of hist) {
+    const b = el("i", h.ok ? (h.degraded ? "degraded" : "up") : "down");
+    b.title = `${new Date(h.at).toLocaleString()} — ${h.ok ? h.latency_ms.toFixed(0) + " ms" : (h.reason || "failed")}`;
+    bars.append(b);
+  }
+  c.append(bars);
+
+  const st = t.stats;
+  const budget = Math.max(0, Math.min(1, st.error_budget_remaining));
+  const bar = el("div", "budget");
+  const fill = el("div");
+  fill.style.width = (budget * 100).toFixed(1) + "%";
+  fill.style.background = budget > 0.5 ? "var(--up)" : budget > 0.1 ? "var(--deg)" : "var(--down)";
+  bar.append(fill);
+
+  const stats = el("div", "stats");
+  stats.append(
+    stat("availability", st.samples ? (st.availability * 100).toFixed(3) + "%" : "—"),
+    stat("p50 latency", fmtMs(st.p50_ns)),
+    stat("p95 latency", fmtMs(st.p95_ns)),
+    stat(`error budget (SLO ${t.slo}%)`,
+         st.error_budget_remaining > 0 ? (st.error_budget_remaining * 100).toFixed(1) + "%" : "exhausted", bar),
+  );
+  c.append(stats);
+
+  if (t.last_check && t.last_check.reason) {
+    c.append(el("div", "reason" + (t.last_check.ok ? " warn" : ""), t.last_check.reason));
+  }
+  return c;
+}
+
+async function refresh() {
+  try {
+    const res = await fetch("/api/status", { cache: "no-store" });
+    const data = await res.json();
+    const hists = await Promise.all(data.targets.map(t =>
+      fetch(`/api/targets/${encodeURIComponent(t.name)}/history?limit=90`).then(r => r.json()).catch(() => [])));
+
+    const banner = document.getElementById("banner");
+    banner.className = "banner " + data.overall;
+    banner.textContent = BANNER[data.overall] || data.overall;
+
+    const root = document.getElementById("targets");
+    root.replaceChildren(...data.targets.map((t, i) => card(t, hists[i] || [])));
+    document.getElementById("updated").textContent = "updated " + new Date(data.generated_at).toLocaleTimeString();
+  } catch (e) {
+    document.getElementById("updated").textContent = "connection lost — retrying";
+  }
+}
+refresh();
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>

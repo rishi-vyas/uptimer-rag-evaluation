@@ -1,0 +1,49 @@
+{
+  "listen": ":8080",
+  "history_size": 1440,
+  "targets": [
+    {
+      "name": "github-api",
+      "type": "http",
+      "url": "https://api.github.com/zen",
+      "interval": "30s",
+      "timeout": "5s",
+      "degraded_latency": "800ms",
+      "slo": 99.9
+    },
+    {
+      "name": "example-homepage",
+      "type": "http",
+      "url": "https://example.com/",
+      "expect_status": [200],
+      "expect_body_contains": "Example Domain",
+      "interval": "1m",
+      "cert_expiry_warning": "336h"
+    },
+    {
+      "name": "cloudflare-dns",
+      "type": "tcp",
+      "address": "1.1.1.1:53",
+      "interval": "15s",
+      "timeout": "2s",
+      "failure_threshold": 2
+    },
+    {
+      "name": "google-dns-lookup",
+      "type": "dns",
+      "host": "google.com",
+      "interval": "1m",
+      "slo": 99.5
+    }
+  ],
+  "alerts": {
+    "repeat_interval": "30m",
+    "webhooks": [
+      {
+        "name": "slack-oncall",
+        "url": "${SLACK_WEBHOOK_URL}",
+        "format": "slack"
+      }
+    ]
+  }
+}

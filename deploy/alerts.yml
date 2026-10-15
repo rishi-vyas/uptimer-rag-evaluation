@@ -1,0 +1,41 @@
+groups:
+  - name: uptimer
+    rules:
+      - alert: TargetDown
+        expr: uptimer_up == 0 and on(target) uptimer_target_status{status="down"} == 1
+        for: 1m
+        labels: { severity: page }
+        annotations:
+          summary: "{{ $labels.target }} is down"
+
+      # Multi-window burn rate: page when the last hour's failures would burn a
+      # 99.9% SLO's 30-day budget in ~2 days (14.4x), confirmed by a 5m window.
+      - alert: ErrorBudgetFastBurn
+        expr: |
+          (
+            sum by (target) (rate(uptimer_checks_total{result="failure"}[1h]))
+              / sum by (target) (rate(uptimer_checks_total[1h]))
+          ) > (14.4 * 0.001)
+          and
+          (
+            sum by (target) (rate(uptimer_checks_total{result="failure"}[5m]))
+              / sum by (target) (rate(uptimer_checks_total[5m]))
+          ) > (14.4 * 0.001)
+        labels: { severity: page }
+        annotations:
+          summary: "{{ $labels.target }} is burning error budget fast"
+
+      - alert: CertificateExpiringSoon
+        expr: (uptimer_cert_expiry_timestamp_seconds - time()) < 14 * 24 * 3600
+        for: 1h
+        labels: { severity: ticket }
+        annotations:
+          summary: "TLS certificate for {{ $labels.target }} expires in under 14 days"
+
+      - alert: SlowProbes
+        expr: |
+          histogram_quantile(0.95, sum by (target, le) (rate(uptimer_check_duration_seconds_bucket[10m]))) > 1
+        for: 10m
+        labels: { severity: ticket }
+        annotations:
+          summary: "p95 probe latency for {{ $labels.target }} above 1s"
